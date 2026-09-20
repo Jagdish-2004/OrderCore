@@ -1,0 +1,21 @@
+### Create order
+POST http://localhost:8081/api/v1/orders
+Content-Type: application/json
+
+{
+  "customerId": "c1",
+  "productId": 101,
+  "quantity": 2
+}
+
+### Get order
+GET http://localhost:8081/api/v1/orders/1
+
+### List orders
+GET http://localhost:8081/api/v1/orders
+
+###
+GET http://localhost:8081/api/v1/orders?page=0&size=2
+
+###
+PATCH http://localhost:8081/api/v1/orders/1/status?status=CONFIRMED

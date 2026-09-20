@@ -1,0 +1,49 @@
+server:
+  port: ${SERVER_PORT:8081}
+
+spring:
+  application:
+    name: order-service
+    version: ${APP_VERSION:0.10.0}
+  rabbitmq:
+    host: localhost
+    port: 5672
+    username: guest
+    password: guest
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/orderdb}
+    username: ${SPRING_DATASOURCE_USERNAME:order}
+    password: ${SPRING_DATASOURCE_PASSWORD:order}
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  health:
+    rabbit:
+      enabled: false
+
+orderflow:
+  rabbitmq:
+    exchange: orderflow.order.events
+    dlx-exchange: orderflow.order.dlx
+    order-created:
+      routing-key: order.created
+      queue: order.created.q
+      dlq-routing-key: order.created.dlq
+      dlq: order.created.dlq
+
+  outbox:
+    publisher-fixed-delay-ms: 2000
+    batch-size: 100
+    retry:
+      max-attempts: 3
+      initial-delay-ms: 2000
+      multiplier: 1.0

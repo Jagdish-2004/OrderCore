@@ -1,0 +1,774 @@
+# PROJECT_STATE.md
+
+Project: OrderFlow  
+Type: Systems-focused backend engineering project  
+Primary Stack: `Spring Boot 3`, `PostgreSQL`, `RabbitMQ`, `JPA`, `Actuator`  
+Language: `Java 17`
+
+Repository layout: `mono-repo` (`services/order-service`)
+
+---
+
+# 1. Project Vision
+
+`OrderFlow` is a production-oriented backend service designed to demonstrate real-world backend engineering practices and portfolio-grade architectural maturity.
+
+The project focuses on building a backend system incrementally while applying disciplined engineering principles.
+
+Core goals include:
+
+- Clean layered architecture
+- Versioned `REST APIs`
+- `DTO` isolation from persistence entities
+- Structured error handling
+- Test isolation and multi-layer testing
+- Containerized runtime environment
+- `CI`-driven quality enforcement
+- Event-driven architecture
+- Messaging reliability patterns
+- Observability and operational visibility
+
+Each milestone introduces new system capabilities commonly found in production systems.
+
+---
+
+# 2. Current Milestone
+
+Milestone: `DLQ` Handling and Failure Observability (`v0.10.0`)  
+Status: Released
+
+Release Tag: `v0.10.0`
+
+Release summary:
+
+This milestone introduces operational reliability improvements and observability for the messaging layer.
+
+Key additions:
+
+- Dead Letter Queue consumer (`OrderCreatedDlqConsumer`)
+- Messaging observability via `Micrometer`
+- Retry diagnostics headers
+- Expanded consumer instrumentation
+- Improved test isolation for `Rabbit` listeners
+- `CI` coverage enforcement using `JaCoCo`
+- Transactional Outbox infrastructure
+- Background outbox event publisher
+
+Verification:
+
+Tests executed successfully.  
+Tests run: 36  
+Failures: 0  
+Errors: 0
+
+CI status: Passing
+
+## Milestone Scope
+
+### Messaging Publisher Foundations (`v0.8.0`)
+
+Messaging infrastructure introduced.
+
+Implemented components:
+
+- `EventPublisher` abstraction
+- `RabbitMqEventPublisher` implementation
+- `OrderCreatedEvent` event contract
+- `RabbitMqConfig` messaging topology
+- `OrderService` publishes event after successful order creation
+
+### Event Consumption and Reliability (`v0.9.0`)
+
+Consumer infrastructure introduced.
+
+Implemented:
+
+- `OrderCreatedEventConsumer`
+- `@RabbitListener` consumer
+- Retry strategy using `Spring AMQP`
+- `Dead Letter Queue` republish strategy
+- Idempotency guard implementation
+
+Components:
+
+- `IdempotencyStore`
+- `JpaIdempotencyStore`
+- `OrderCreatedEventHandler`
+- `LoggingOrderCreatedEventHandler`
+
+Tests added:
+
+- consumer processing
+- duplicate event skipping
+- invalid payload rejection
+
+### DLQ Handling and Failure Observability (`v0.10.0`)
+
+Operational reliability improvements introduced.
+
+New components:
+
+#### DLQ Consumer
+
+- `OrderCreatedDlqConsumer`
+- Consumes messages from `order.created.dlq`
+- Logs full diagnostic context for failed events
+
+#### Messaging Metrics
+
+- `MessagingMetrics` component
+- `Micrometer` counters added
+
+Metrics tracked:
+
+- `orderflow.messaging.events.consumed`
+- `orderflow.messaging.events.duplicates`
+- `orderflow.messaging.events.failed`
+- `orderflow.messaging.events.dlq`
+
+#### Improved Retry Configuration
+
+`RabbitListenerRetryConfig` enhanced to attach diagnostic headers:
+
+- `x-original-exchange`
+- `x-original-routingKey`
+
+These headers allow `DLQ` consumers to trace message origin.
+
+#### Consumer Instrumentation
+
+`OrderCreatedEventConsumer` now records:
+
+- successful processing
+- duplicate events
+- invalid payloads
+- retry-triggered failures
+
+#### Test Environment Improvement
+
+`Rabbit` listeners disabled during tests to avoid broker dependency:
+
+`spring.rabbitmq.listener.simple.auto-startup=false`
+
+---
+
+# 3. Architecture Decisions (ADR Style)
+
+## ADR-001 Layered Architecture
+`Controller` → `Service` → `Repository` → `Database`
+
+Status: Implemented
+
+## ADR-002 DTO Isolation
+Entities are not exposed through `API` responses.
+
+Status: Implemented
+
+## ADR-003 API Versioning
+URL versioning strategy:
+`/api/v1/...`
+
+Status: Implemented
+
+## ADR-004 Profile-Based Test Isolation
+Profiles:
+
+- `test` → `H2`
+- `dev`/`docker` → `PostgreSQL`
+
+Status: Implemented
+
+## ADR-005 Maven Wrapper
+Ensures reproducible builds.
+
+Status: Implemented
+
+## ADR-006 OpenAPI Documentation
+Swagger UI and `OpenAPI` specification available.
+
+Status: Implemented
+
+## ADR-007 Structured Exception Handling
+Centralized error responses using:
+
+- `ApiError`
+- `ValidationError`
+- `GlobalExceptionHandler`
+
+Status: Implemented
+
+## ADR-008 Dockerized Runtime
+Application runs via `Docker Compose`.
+
+```bash
+docker compose up --build
+```
+
+Status: Implemented
+
+## ADR-009 Coverage Enforcement
+`JaCoCo` coverage integrated with `CI` and `Codecov`.
+
+Status: Implemented
+
+## ADR-010 Messaging Boundary
+Domain logic publishes events through abstraction.
+
+Components:
+
+- `EventPublisher`
+- `RabbitMqEventPublisher`
+
+Status: Implemented
+
+## ADR-011 Idempotent Event Consumption
+
+Processing flow:
+
+```mermaid
+flowchart TD
+    A[RabbitMQ message] --> B(OrderCreatedEventConsumer)
+    B --> C{IdempotencyStore.isProcessed(eventId)}
+C -- true --> D(Duplicate: Skip)
+C -- false --> E(Process Event)
+E --> F(handler.handle(event))
+F --> G(IdempotencyStore.markProcessed(eventId))
+G --> H(metrics.incrementConsumed())
+end
+```
+
+`IdempotencyStore` interface:
+
+```java
+public interface IdempotencyStore {
+    boolean isProcessed(UUID eventId);
+    void markProcessed(UUID eventId);
+}
+```
+
+Status: Implemented
+
+## ADR-012 Retry and DLQ Strategy
+Message failures handled using:
+
+- `Spring AMQP` retry interceptor
+- `RepublishMessageRecoverer`
+- `Dead-letter` routing
+
+Status: Implemented
+
+## ADR-013 Dedicated DLQ Processing
+Dead-lettered messages are consumed explicitly rather than left unprocessed.
+
+Implemented via:
+
+- `OrderCreatedDlqConsumer`
+
+Status: Implemented
+
+## ADR-014 Messaging Observability
+Messaging events tracked using `Micrometer` metrics.
+
+Status: Implemented
+
+---
+
+# 4. Implemented Components
+
+## Core Architecture
+- Strict layered architecture with clear responsibility separation.
+
+## Domain Layer
+
+Entities:
+
+- `Order`
+- `OrderStatus`
+
+## Service Layer
+- Business logic encapsulated inside transactional boundaries.
+
+Responsibilities:
+
+- create order
+- update order status
+- list orders with pagination
+- persist `OrderCreatedEvent` to transactional outbox
+
+## Persistence Layer
+
+`Spring Data` repository:
+
+- `OrderRepository`
+
+## Web Layer
+
+`REST` endpoints:
+
+- `/api/v1/orders`
+
+Features:
+
+- `Bean` validation
+- structured error responses
+- pagination support
+
+## Messaging Layer
+
+### Publisher
+
+Components:
+
+- `EventPublisher`
+- `RabbitMqEventPublisher`
+- `OrderCreatedEvent`
+
+### Transactional Outbox
+
+Messaging reliability enhanced with a transactional outbox pattern.
+
+Purpose:
+
+Ensure reliable event publication even when message brokers are temporarily unavailable.
+
+Components:
+
+- `OutboxEvent`
+- `OutboxEventStatus`
+- `OutboxEventRepository`
+- `OutboxEventWriter`
+- `OutboxPublishingService`
+- `OutboxPublisherWorker`
+
+Flow:
+
+1. Order is created inside a database transaction.
+2. `OrderCreatedEvent` is serialized and stored in `outbox_events`.
+3. Scheduled worker scans for events with status:
+    - PENDING
+    - FAILED (eligible for retry)
+      Eligible events are filtered using OutboxRetryPolicy.
+4. Events are published to `RabbitMQ`.
+5. Event status updated to `PUBLISHED` or `FAILED`.
+
+Advantages:
+
+- guarantees atomic write of domain change + event
+- prevents event loss
+- enables retry strategies
+
+Database table: `outbox_events`
+
+Fields include:
+
+- `event_id`
+- `aggregate_type`
+- `aggregate_id`
+- `event_type`
+- `payload`
+- `status`
+- `attempt_count`
+- `created_at`
+- `published_at`
+
+### Outbox Retry Strategy
+
+`OutboxPublisherWorker` now supports retrying `FAILED` events.
+
+Mechanism:
+
+- events selected with status `IN (PENDING, FAILED)`
+- retry eligibility checked via `OutboxRetryPolicy`
+- exponential backoff applied
+- max attempts enforced
+
+Configuration:
+
+```yaml
+orderflow:
+  outbox:
+    retry:
+      max-attempts: 3
+      initial-delay-ms: 1000
+      multiplier: 2
+```
+
+Metrics:
+
+- `orderflow.outbox.events.retried`
+
+### Messaging Configuration
+
+Components:
+
+- `RabbitMqConfig`
+- `RabbitListenerRetryConfig`
+
+Defines:
+
+- exchanges
+- queues
+- routing keys
+- retry interceptors
+- `DLQ` routing
+
+### Event Consumer
+
+- `OrderCreatedEventConsumer`
+
+Responsibilities:
+
+- consume messages
+- validate payload
+- enforce idempotency
+- delegate event handling
+- record messaging metrics
+
+### Event Handler
+
+Components:
+
+- `OrderCreatedEventHandler`
+- `LoggingOrderCreatedEventHandler`
+
+Current behavior:
+
+- Logs event consumption.
+
+Future behavior:
+
+- Integration with other services.
+
+### Idempotency Protection
+
+Components:
+
+- `IdempotencyStore`
+- `JpaIdempotencyStore`
+
+Ensures duplicate events are skipped even across service restarts.
+
+### Dead Letter Queue Processing
+
+Component:
+
+- `OrderCreatedDlqConsumer`
+
+Responsibilities:
+
+- consume `DLQ` messages
+- increment `DLQ` metrics
+- log diagnostic metadata
+
+### Messaging Metrics
+
+Component:
+
+- `MessagingMetrics`
+
+Counters tracked:
+
+- consumed events
+- duplicate events
+- failed events
+- `DLQ` events
+
+## Observability
+- `Spring Boot Actuator` enabled.
+
+Available endpoints:
+
+- `/actuator/health`
+- `/actuator/metrics`
+
+Messaging metrics exposed through `Micrometer`.
+
+Outbox metrics:
+
+- `orderflow.outbox.events.created`
+- `orderflow.outbox.events.published`
+- `orderflow.outbox.events.failed`
+- `orderflow.outbox.events.retried`
+
+## OpenAPI
+- Swagger UI and `OpenAPI JSON` verified.
+
+---
+
+# 5. API Contract Summary
+
+Base path:
+
+- `/api/v1/orders`
+
+### Create Order
+`POST /api/v1/orders`
+
+Returns:
+
+- `201` → `OrderResponse`
+
+### Get Order
+`GET /api/v1/orders/{id}`
+
+### List Orders
+`GET /api/v1/orders?page=0&size=10`
+
+Returns:
+
+- `OrderPageResponse`
+
+### Update Order Status
+`PATCH /api/v1/orders/{id}/status`
+
+#### Error Contracts
+
+- `ApiError`
+
+Fields:
+
+- `timestamp`
+- `status`
+- `error`
+- `message`
+- `path`
+
+- `ValidationError` extends `ApiError` with:
+
+- `fieldErrors`
+
+---
+
+# 6. Testing Strategy
+
+Three testing layers implemented.
+
+## Web Layer
+
+Tools:
+
+- `WebMvcTest`
+- `MockMvc`
+
+Validates:
+
+- `HTTP` status codes
+- validation rules
+- response structure
+
+## Repository Tests
+
+Tool:
+
+- `DataJpaTest`
+
+Uses `H2` in-memory database.
+
+Validates:
+
+- entity mappings
+- persistence behavior
+
+## Service Unit Tests
+
+Tool:
+
+- `Mockito`
+
+Validates:
+
+- order creation
+- pagination logic
+- status updates
+- `NotFound` scenarios
+
+## Messaging Tests
+
+Consumer tests validate:
+
+- first-time processing
+- duplicate event skipping
+- invalid payload handling
+
+Test results:
+
+```
+Tests run: 36
+Failures: 0
+Errors: 0
+```
+
+---
+
+# 7. Code Quality and CI
+
+## JaCoCo
+
+Coverage reports generated locally and in `CI`.
+
+Report location:
+
+`services/order-service/target/site/jacoco/index.html`
+
+## Codecov
+
+Coverage uploaded automatically via `GitHub Actions`.
+
+## CI Pipeline
+
+Pipeline stages:
+
+- build
+- test
+- coverage
+- coverage enforcement
+- `Codecov` upload
+
+Status: Operational
+
+---
+
+# 8. Local Runtime
+
+Start environment:
+
+```bash
+docker compose up --build
+```
+
+Access:
+
+Swagger UI: [http://localhost:8081/swagger-ui/index.html](http://localhost:8081/swagger-ui/index.html)
+
+OpenAPI spec: [http://localhost:8081/v3/api-docs](http://localhost:8081/v3/api-docs)
+
+Health check: [http://localhost:8081/actuator/health](http://localhost:8081/actuator/health)
+
+---
+
+# 9. Versioning and Releases
+
+Current milestone:
+
+- `v0.10.0`
+
+Release workflow:
+
+- commit → tests → version bump → tag → release
+
+Version badge automatically reflects `GitHub` release tags.
+
+---
+
+# 10. Next Milestone
+
+Milestone: `Production Messaging Resilience` (`v1.0.0`)  
+Status: Planned
+
+Goal:
+
+Stabilize the event-driven architecture and introduce production-grade failure recovery mechanisms.
+
+Planned improvements:
+
+## Outbox Retry Strategy
+
+Introduce retry with exponential backoff for failed outbox events.
+
+Components:
+
+- retry scheduler
+- configurable retry limit
+- retry delay strategy
+
+## DLQ Replay Tooling
+
+Allow operators to replay failed messages from `DLQ`.
+
+Features:
+
+- manual replay endpoint
+- event inspection tools
+- `DLQ` diagnostics
+
+## Event Replay Capability
+
+Enable reprocessing of historical events.
+
+Purpose:
+
+- recovery from downstream service failures
+- system state reconstruction
+
+## Multi-Service Event Flow
+
+Introduce a second service consuming events.
+
+Candidate services:
+
+- Inventory Service
+- Payment Service
+
+Goal:
+
+Demonstrate a full event-driven microservice interaction.
+
+## Operational Improvements
+
+- improved logging context
+- distributed tracing readiness
+- enhanced metrics
+
+---
+
+Target release: `v1.0.0`
+
+---
+
+# 11. Known Observations
+
+1. `@MockBean` deprecation warnings appear under `Spring Boot 3.5.x` (non-breaking).
+2. Messaging runtime requires `RabbitMQ` broker availability.
+3. Idempotency is persisted in PostgreSQL via JpaIdempotencyStore to survive restarts and redeliveries.
+4. `DLQ` consumer logs failures but does not persist them.
+
+---
+
+# 12. Current Stability Assessment
+
+Build: Passing
+Tests: Passing
+Coverage: Enforced
+CI: Operational
+Docker runtime: Verified
+
+Messaging capabilities:
+
+- publisher
+- consumer
+- retry
+- `DLQ`
+- idempotency
+- messaging metrics
+
+## Runtime Behavior Validation
+
+The system has been validated against real failure scenarios:
+
+Scenario: Broker unavailable
+- Outbox events marked `FAILED`
+- `attempt_count` incremented
+- `failure_reason` stored
+
+Scenario: Broker recovery
+- failed events retried
+- events successfully published
+- status updated to `PUBLISHED`
+
+Scenario: Duplicate message delivery
+- duplicates detected via `IdempotencyStore`
+- skipped without reprocessing
+
+Project maturity:
+
+Production-grade backend service demonstrating real-world event-driven architecture and reliability patterns.
